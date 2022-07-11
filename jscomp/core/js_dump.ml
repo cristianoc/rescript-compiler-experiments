@@ -166,6 +166,7 @@ let exp_need_paren (e : J.expression) =
   | Optional_block _ | Caml_block _ | FlatCall _ | Typeof _ | Number _
   | Js_not _ | Bool _ | New _ ->
       false
+  | Await _ -> false
 
 let comma_idents (cxt : cxt) f ls = iter_lst cxt f ls Ext_pp_scope.ident comma
 
@@ -295,7 +296,7 @@ let rec try_optimize_curry cxt f len function_id =
   Curry_gen.pp_optimize_curry f len;
   P.paren_group f 1 (fun _ -> expression ~level:1 cxt f function_id)
 
-and pp_function ~return_unit ~is_method cxt (f : P.t) ~fn_state
+and pp_function ~return_unit ~async ~is_method cxt (f : P.t) ~fn_state
     (l : Ident.t list) (b : J.block) (env : Js_fun_env.t) : cxt =
   match b with
   | [
@@ -391,23 +392,23 @@ and pp_function ~return_unit ~is_method cxt (f : P.t) ~fn_state
             match fn_state with
             | Is_return ->
                 return_sp f;
-                P.string f L.function_;
+                P.string f (L.function_async ~async);
                 P.space f;
                 param_body ()
             | No_name { single_arg } ->
                 (* see # 1692, add a paren for annoymous function for safety  *)
                 P.cond_paren_group f (not single_arg) 1 (fun _ ->
-                    P.string f L.function_;
+                    P.string f (L.function_async ~async);
                     P.space f;
                     param_body ())
             | Name_non_top x ->
                 ignore (pp_var_assign inner_cxt f x : cxt);
-                P.string f L.function_;
+                P.string f (L.function_async ~async);
                 P.space f;
                 param_body ();
                 semi f
             | Name_top x ->
-                P.string f L.function_;
+                P.string f (L.function_async ~async);
                 P.space f;
                 ignore (Ext_pp_scope.ident inner_cxt f x : cxt);
                 param_body ())
@@ -423,7 +424,7 @@ and pp_function ~return_unit ~is_method cxt (f : P.t) ~fn_state
             | Name_non_top name | Name_top name ->
                 ignore (pp_var_assign inner_cxt f name : cxt));
             P.string f L.lparen;
-            P.string f L.function_;
+            P.string f (L.function_async ~async);
             pp_paren_params inner_cxt f lexical;
             P.brace_vgroup f 0 (fun _ ->
                 return_sp f;
@@ -530,10 +531,10 @@ and expression_desc cxt ~(level : int) f x : cxt =
           let cxt = expression ~level:0 cxt f e1 in
           comma_sp f;
           expression ~level:0 cxt f e2)
-  | Fun (is_method, l, b, env, return_unit) ->
+  | Fun (is_method, l, b, env, return_unit, async) ->
       (* TODO: dump for comments *)
       pp_function ~is_method cxt f ~fn_state:default_fn_exp_state l b env
-        ~return_unit
+        ~return_unit ~async
       (* TODO:
          when [e] is [Js_raw_code] with arity
          print it in a more precise way
@@ -554,10 +555,10 @@ and expression_desc cxt ~(level : int) f x : cxt =
                       | [
                        {
                          expression_desc =
-                           Fun (is_method, l, b, env, return_unit);
+                           Fun (is_method, l, b, env, return_unit, async);
                        };
                       ] ->
-                          pp_function ~is_method ~return_unit cxt f
+                          pp_function ~is_method ~return_unit ~async cxt f
                             ~fn_state:(No_name { single_arg = true })
                             l b env
                       | _ -> arguments cxt f el)
@@ -856,6 +857,10 @@ and expression_desc cxt ~(level : int) f x : cxt =
             cxt)
           else
             P.brace_vgroup f 1 (fun _ -> property_name_and_value_list cxt f lst))
+  | Await e ->
+      P.cond_paren_group f (level > 13) 1 (fun _ ->
+          P.string f "await ";
+          expression ~level:13 cxt f e)
 
 and property_name_and_value_list cxt f (l : J.property_map) =
   iter_lst cxt f l
@@ -897,8 +902,8 @@ and variable_declaration top cxt f (variable : J.variable_declaration) : cxt =
           statement_desc top cxt f (J.Exp e)
       | _ -> (
           match e.expression_desc with
-          | Fun (is_method, params, b, env, return_unit) ->
-              pp_function ~is_method cxt f ~return_unit
+          | Fun (is_method, params, b, env, return_unit, async) ->
+              pp_function ~is_method cxt f ~return_unit ~async
                 ~fn_state:(if top then Name_top name else Name_non_top name)
                 params b env
           | _ ->
@@ -1124,10 +1129,10 @@ and statement_desc top cxt f (s : J.statement_desc) : cxt =
       cxt
   | Return e -> (
       match e.expression_desc with
-      | Fun (is_method, l, b, env, return_unit) ->
+      | Fun (is_method, l, b, env, return_unit, async) ->
           let cxt =
-            pp_function ~return_unit ~is_method cxt f ~fn_state:Is_return l b
-              env
+            pp_function ~return_unit ~is_method ~async cxt f ~fn_state:Is_return
+              l b env
           in
           semi f;
           cxt

@@ -248,6 +248,11 @@ let translate loc (prim_name : string) (args : J.expression list) : J.expression
       match args with
       | [ e1; e2 ] -> E.unchecked_int32_mul e1 e2
       | _ -> assert false)
+  | "?await" -> (
+      match args with
+      | [e] -> {e with expression_desc = Await e}
+      | _ -> assert false
+  )
   | _ ->
       Bs_warnings.warn_missing_primitive loc prim_name;
       E.resolve_and_apply prim_name args

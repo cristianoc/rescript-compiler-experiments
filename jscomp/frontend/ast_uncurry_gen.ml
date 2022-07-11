@@ -68,7 +68,7 @@ let to_method_callback loc (self : Bs_ast_mapper.mapper) label
       ] )
 
 let to_uncurry_fn loc (self : Bs_ast_mapper.mapper) (label : Asttypes.arg_label)
-    pat body : Parsetree.expression_desc =
+    pat body async : Parsetree.expression_desc =
   Bs_syntaxerr.optional_err loc label;
   let rec aux acc (body : Parsetree.expression) =
     match Ast_attributes.process_attributes_rev body.pexp_attributes with
@@ -83,10 +83,13 @@ let to_uncurry_fn loc (self : Bs_ast_mapper.mapper) (label : Asttypes.arg_label)
   let first_arg = self.pat self pat in
 
   let result, rev_extra_args = aux [ (label, first_arg) ] body in
+  let result = Ast_async.add_promise_type ~async result in
   let body =
     Ext_list.fold_left rev_extra_args result (fun e (label, p) ->
         Ast_helper.Exp.fun_ ~loc label None p e)
   in
+  let body = Ast_async.add_async_attribute ~async body in
+
   let len = List.length rev_extra_args in
   let arity =
     match rev_extra_args with

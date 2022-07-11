@@ -150,10 +150,10 @@ let expression_desc : expression_desc fn =
   | Var _x0 ->
       let _x0 = _self.vident _self _x0 in
       Var _x0
-  | Fun (_x0, _x1, _x2, _x3, _x4) ->
+  | Fun (_x0, _x1, _x2, _x3, _x4, _x5) ->
       let _x1 = list _self.ident _self _x1 in
       let _x2 = _self.block _self _x2 in
-      Fun (_x0, _x1, _x2, _x3, _x4)
+      Fun (_x0, _x1, _x2, _x3, _x4, _x5)
   | Str _ as v -> v
   | Raw_js_code _ as v -> v
   | Array (_x0, _x1) ->
@@ -175,6 +175,9 @@ let expression_desc : expression_desc fn =
       Object _x0
   | Undefined as v -> v
   | Null as v -> v
+  | Await _x0 ->
+    let _x0 = _self.expression _self _x0 in
+    Await _x0
 
 let for_ident_expression : for_ident_expression fn =
  fun _self arg -> _self.expression _self arg

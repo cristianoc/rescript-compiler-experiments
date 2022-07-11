@@ -76,7 +76,9 @@ let pat_mapper (self : mapper) (e : Parsetree.pattern) =
   | Ppat_constant (Pconst_integer (s, Some 'l')) ->
     {e with ppat_desc = Ppat_constant (Pconst_integer(s,None))}
   | _ -> default_pat_mapper  self e 
-let expr_mapper  (self : mapper) (e : Parsetree.expression) =
+let expr_mapper ~async_context ~in_function_def (self : mapper) (e : Parsetree.expression) =
+  let old_in_function_def = !in_function_def in
+  in_function_def := false;
   match e.pexp_desc with
   (* Its output should not be rewritten anymore *)
   | Pexp_extension extension ->
@@ -113,6 +115,7 @@ let expr_mapper  (self : mapper) (e : Parsetree.expression) =
          | Not_found -> 0
          | Invalid_argument -> 1
        ]}*)
+    async_context := false;
     (match Ast_attributes.process_pexp_fun_attributes_rev e.pexp_attributes with
      | false, _ ->
        default_expr_mapper self  e
@@ -121,19 +124,25 @@ let expr_mapper  (self : mapper) (e : Parsetree.expression) =
 
   | Pexp_fun (label, _, pat , body)
     ->
+    let async = Ast_attributes.has_async_payload e.pexp_attributes <> None in
     begin match Ast_attributes.process_attributes_rev e.pexp_attributes with
-      | Nothing, _
-        -> default_expr_mapper self e
+      | Nothing, _ ->
+        (* Handle @async x => y => ... is in async context *)
+        async_context := (old_in_function_def && !async_context) || async;
+        in_function_def := true;
+        Ast_async.make_function_async ~async (default_expr_mapper self e)
       | Uncurry _, pexp_attributes
         ->
+        async_context := async;
         {e with
-         pexp_desc = Ast_uncurry_gen.to_uncurry_fn e.pexp_loc self label pat body  ;
+         pexp_desc = Ast_uncurry_gen.to_uncurry_fn e.pexp_loc self label pat body async;
          pexp_attributes}
       | Method _ , _
         ->  Location.raise_errorf ~loc:e.pexp_loc "%@meth is not supported in function expression"
       | Meth_callback _, pexp_attributes
         ->
         (* FIXME: does it make sense to have a label for [this] ? *)
+        async_context := false;
         {e with pexp_desc = Ast_uncurry_gen.to_method_callback e.pexp_loc  self label pat body ;
                 pexp_attributes }
     end
@@ -194,6 +203,16 @@ let expr_mapper  (self : mapper) (e : Parsetree.expression) =
   *)
   | _ ->  default_expr_mapper self e
 
+let expr_mapper ~async_context ~in_function_def (self : mapper) (e : Parsetree.expression) =
+  let async_saved = !async_context in
+  let result = expr_mapper ~async_context ~in_function_def self e in
+  async_context := async_saved;
+  match Ast_attributes.has_await_payload e.pexp_attributes with
+  | None -> result
+  | Some _ ->
+    if !async_context = false then
+      Location.raise_errorf ~loc:e.pexp_loc "Await on expression not in an async context";
+    Ast_await.create_await_expression result
 
 let typ_mapper (self : mapper) (typ : Parsetree.core_type) = 
   Ast_core_type_class_type.typ_mapper self typ
@@ -456,7 +475,7 @@ let rec
 
 let  mapper : mapper =
   { default_mapper with
-    expr = expr_mapper;
+    expr = expr_mapper ~async_context:(ref false) ~in_function_def:(ref false);
     pat = pat_mapper; 
     typ = typ_mapper ;
     class_type = class_type_mapper;      

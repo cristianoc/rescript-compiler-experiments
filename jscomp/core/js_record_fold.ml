@@ -152,7 +152,7 @@ let expression_desc : 'a. ('a, expression_desc) fn =
   | Var _x0 ->
       let st = _self.vident _self st _x0 in
       st
-  | Fun (_x0, _x1, _x2, _x3, _x4) ->
+  | Fun (_x0, _x1, _x2, _x3, _x4, _x5) ->
       let st = list _self.ident _self st _x1 in
       let st = _self.block _self st _x2 in
       st
@@ -177,6 +177,9 @@ let expression_desc : 'a. ('a, expression_desc) fn =
       st
   | Undefined -> st
   | Null -> st
+  | Await _x0 ->
+    let st = _self.expression _self st _x0 in
+    st
 
 let for_ident_expression : 'a. ('a, for_ident_expression) fn =
  fun _self arg -> _self.expression _self arg
